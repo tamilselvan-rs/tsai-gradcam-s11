@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam.utils.image import show_cam_on_image
 
 def print_model_summary(model):
     summary(model, input_size=(3, 32, 32)) 
@@ -25,24 +27,61 @@ def imshow(img):
     plt.imshow(np.transpose(npimg, (1, 2, 0)))
     plt.show()
 
+def show_grad_cam_output(model, data_loader, device, inv_normalization):
+    cifar_dict = {
+            0: "airplane",
+            1: "automobile",
+            2: "bird",
+            3: "cat",
+            4: "deer",
+            5: "dog",
+            6: "frog",
+            7: "horse",
+            8: "ship",
+            9: "truck"
+        }
+
+    target_layers = [model.layer4[-1]]
+    targets = None
+    cam = GradCAM(model=model, target_layers=target_layers, use_cuda=True)
+    [output, pred_labels, correct_labels] = get_missclassification(model, data_loader, device)
+    grayscale_cam = cam(input_tensor=output)
+
+    fig, axs = plt.subplots(10, 2, figsize=(5, 20))
+    for j in range(10):
+        index_1d = j;
+        # print(out[index_1d])
+        img = output[index_1d]
+        grad_cam_img = grayscale_cam[index_1d]
+        inv_image = inv_normalization(img)
+        # print(img)
+        rgb_img = np.clip(np.transpose(inv_image.numpy(), (1,2,0)), 0, 1)
+        visualization = show_cam_on_image(rgb_img, grad_cam_img, use_rgb=True)
+        # print(f'{np.amax(npimg)}, {np.amin(npimg)}')
+        axs[j, 0].imshow(visualization)
+        axs[j, 0].set_title(f'Predict: {cifar_dict[int(pred_labels[index_1d].numpy())]}')
+        axs[j, 0].axis('off')
+        axs[j, 1].imshow(rgb_img)
+        axs[j, 1].set_title(f'Actual: {cifar_dict[int(correct_labels[index_1d].numpy())]}')
+        axs[j, 1].axis('off')
+    plt.show()
+
 def get_missclassification(model, data_loader, device):
     model.eval()
     incorrect_preds = []
-    for batch_idx, (data, target) in enumerate(data_loader):
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-            incorrect_preds.append(get_incorrect_predictions(output, target))
-
-    
-
-    out = torch.index_select(data, 0, torch.tensor(incorrect_preds).to(device)).cpu()
-    pred_labels = torch.index_select(output.argmax(dim=1), 0, torch.tensor(incorrect_preds).to(device)).cpu()
-    correct_labels = torch.index_select(target, 0, torch.tensor(incorrect_preds).to(device)).cpu()
-    return [
-        out,
-        pred_labels,
-        correct_labels
-    ]
+    with torch.no_grad():
+        for batch_idx, (data, target) in enumerate(data_loader):
+                data, target = data.to(device), target.to(device)
+                output = model(data)
+                incorrect_preds = get_incorrect_predictions(output, target)
+                out = torch.index_select(data, 0, torch.tensor(incorrect_preds).to(device)).cpu()
+                pred_labels = torch.index_select(output.argmax(dim=1), 0, torch.tensor(incorrect_preds).to(device)).cpu()
+                correct_labels = torch.index_select(target, 0, torch.tensor(incorrect_preds).to(device)).cpu()
+                return [
+                    out,
+                    pred_labels,
+                    correct_labels
+                ]
 
 import torchvision
 def print_incorrect_preds(model, data_loader, device, inv_normalization: torchvision.transforms.Normalize, count):
@@ -61,19 +100,21 @@ def print_incorrect_preds(model, data_loader, device, inv_normalization: torchvi
 
     [out, pred_labels, correct_labels] = get_missclassification(model, data_loader, device)
 
-    fig, axs = plt.subplots(2, 5)
+    fig, axs = plt.subplots(2, 5, figsize=(10, 5))
     for j in range(2):
         for i in range(5):
             index_1d = 5*j + i;
             # print(out[index_1d])
             img = out[index_1d]
-            img = inv_normalization(image=img)["image"]
+            img = inv_normalization(img)
             # print(img)
             npimg = img.numpy()
             npimg = np.transpose(npimg, (1,2,0))
             # print(f'{np.amax(npimg)}, {np.amin(npimg)}')
             axs[j, i].imshow(npimg)
-            axs[j, i].set_title(f'Predicted: {cifar_dict[int(pred_labels[index_1d].numpy())]}/ Actual: {cifar_dict[int(correct_labels[index_1d].numpy())]}')
+            axs[j, i].axis('off')
+            axs[j, i].set_title(f'Predict: {cifar_dict[int(pred_labels[index_1d].numpy())]} \n Actual: {cifar_dict[int(correct_labels[index_1d].numpy())]}')
+    plt.axis('off')
     plt.show()
 
 def train_model(model, device, train_loader, optimizer, criterion):
@@ -133,7 +174,7 @@ def test_model(model, device, test_loader, criterion):
             data, target = data.to(device), target.to(device)
 
             output = model(data)
-            test_loss += criterion(output, target, reduction='sum').item()  # sum up batch loss
+            test_loss += criterion(output, target).item()  # sum up batch loss
 
             correct += get_correct_predict_count(output, target)
             incorrect_preds = get_incorrect_predictions(output, target)
