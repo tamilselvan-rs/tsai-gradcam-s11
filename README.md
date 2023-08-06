@@ -32,4 +32,5 @@
 ## Important Resources
 
 [ResNet Implementation](https://github.com/kuangliu/pytorch-cifar)  
-[Grad-Cam Library](https://jacobgil.github.io/pytorch-gradcam-book/introduction.html)
+[Grad-Cam Library](https://jacobgil.github.io/pytorch-gradcam-book/introduction.html)  
+[How to save an entire model?](https://pytorch.org/tutorials/beginner/saving_loading_models.html)
